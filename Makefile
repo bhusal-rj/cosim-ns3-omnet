@@ -12,10 +12,10 @@ BUILD_DIR = build
 INCLUDES = -I$(SRC_DIR)/common
 
 # Source files
-SOURCES = $(SRC_DIR)/common/message.cpp main.cpp
+SOURCES = $(SRC_DIR)/common/message.cpp $(SRC_DIR)/common/config.cpp main.cpp
 
 # Object files
-OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/main.o
+OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/config.o $(BUILD_DIR)/main.o
 
 # Target executable
 TARGET = cosimulation
@@ -33,6 +33,10 @@ $(TARGET): $(OBJECTS)
 
 # Compile message.cpp
 $(BUILD_DIR)/message.o: $(SRC_DIR)/common/message.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile config.cpp
+$(BUILD_DIR)/config.o: $(SRC_DIR)/common/config.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile main.cpp
