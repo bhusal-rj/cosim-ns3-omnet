@@ -11,11 +11,14 @@ BUILD_DIR = build
 # Include paths
 INCLUDES = -I$(SRC_DIR)/common
 
+# Libraries
+LIBS = -lm  # Add math library
+
 # Source files
-SOURCES = $(SRC_DIR)/common/message.cpp $(SRC_DIR)/common/config.cpp $(SRC_DIR)/common/synchronizer.cpp main.cpp
+SOURCES = $(SRC_DIR)/common/message.cpp $(SRC_DIR)/common/config.cpp $(SRC_DIR)/common/synchronizer.cpp $(SRC_DIR)/common/mock_simulators.cpp main.cpp
 
 # Object files
-OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/config.o $(BUILD_DIR)/synchronizer.o $(BUILD_DIR)/main.o
+OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/config.o $(BUILD_DIR)/synchronizer.o $(BUILD_DIR)/mock_simulators.o $(BUILD_DIR)/main.o
 
 # Target executable
 TARGET = cosimulation
@@ -29,7 +32,7 @@ $(BUILD_DIR):
 
 # Build target
 $(TARGET): $(OBJECTS)
-	$(CXX) $(OBJECTS) -o $(TARGET)
+	$(CXX) $(OBJECTS) -o $(TARGET) $(LIBS)
 
 # Compile message.cpp
 $(BUILD_DIR)/message.o: $(SRC_DIR)/common/message.cpp
@@ -41,6 +44,10 @@ $(BUILD_DIR)/config.o: $(SRC_DIR)/common/config.cpp
 
 # Compile synchronizer.cpp
 $(BUILD_DIR)/synchronizer.o: $(SRC_DIR)/common/synchronizer.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile mock_simulators.cpp
+$(BUILD_DIR)/mock_simulators.o: $(SRC_DIR)/common/mock_simulators.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile main.cpp

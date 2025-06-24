@@ -1,55 +1,46 @@
 /*
 Main entry point for the co-simulation platform
-Test message, config, and vehicle data systems
+Test the complete synchronizer with mock simulators
 */
 
 #include "message.h"
 #include "config.h"
+#include "synchronizer.h"
+#include "mock_simulators.h"
 #include <iostream>
+#include <memory>
 
 int main() {
     std::cout << "Co-simulation platform starting..." << std::endl;
     
-    // Test creating a basic message
-    cosim::Message msg(cosim::MessageType::SYNC_REQUEST, 1.0);
-    std::cout << "Message created with timestamp: " << msg.getTimestamp() << std::endl;
-    
-    // Test creating and using config
+    // Create configuration
     cosim::Config config;
-    std::cout << "Simulation time: " << config.getSimulationTime() << " seconds" << std::endl;
-    std::cout << "Sync interval: " << config.getSyncInterval() << " seconds" << std::endl;
-    std::cout << "NS-3 port: " << config.getNS3Config().port << std::endl;
-    std::cout << "OMNeT++ port: " << config.getOMNeTConfig().port << std::endl;
+    config.setSimulationTime(5.0);  // Run for 5 seconds
+    config.setSyncInterval(0.5);    // Sync every 0.5 seconds
     
-    // Test vehicle message system
-    cosim::VehicleMessage vehicleMsg(2.5);
+    std::cout << "Configuration:" << std::endl;
+    std::cout << "  Simulation time: " << config.getSimulationTime() << " seconds" << std::endl;
+    std::cout << "  Sync interval: " << config.getSyncInterval() << " seconds" << std::endl;
     
-    // Add some test vehicles
-    cosim::VehicleInfo vehicle1;
-    vehicle1.id = "vehicle_001";
-    vehicle1.x = 100.0;
-    vehicle1.y = 200.0;
-    vehicle1.z = 0.0;
-    vehicle1.speed = 15.5;
-    vehicle1.heading = 90.0;
-    vehicle1.timestamp = 2.5;
+    // Create synchronizer
+    cosim::Synchronizer synchronizer(config);
     
-    cosim::VehicleInfo vehicle2;
-    vehicle2.id = "vehicle_002";
-    vehicle2.x = 150.0;
-    vehicle2.y = 180.0;
-    vehicle2.z = 0.0;
-    vehicle2.speed = 12.3;
-    vehicle2.heading = 45.0;
-    vehicle2.timestamp = 2.5;
+    // Create mock simulators
+    auto ns3Simulator = std::make_shared<cosim::MockNS3Simulator>();
+    auto omnetSimulator = std::make_shared<cosim::MockOMNeTSimulator>();
     
-    vehicleMsg.addVehicle(vehicle1);
-    vehicleMsg.addVehicle(vehicle2);
+    // Add simulators to synchronizer
+    synchronizer.addSimulator(ns3Simulator);
+    synchronizer.addSimulator(omnetSimulator);
     
-    std::cout << "\nVehicle message created with " << vehicleMsg.getVehicleCount() << " vehicles:" << std::endl;
-    for (const auto& vehicle : vehicleMsg.getVehicles()) {
-        std::cout << "  Vehicle " << vehicle.id << " at (" << vehicle.x << ", " << vehicle.y 
-                  << ") speed: " << vehicle.speed << " m/s" << std::endl;
+    // Initialize and run simulation
+    if (synchronizer.initialize()) {
+        std::cout << "\n=== Starting Co-Simulation ===" << std::endl;
+        synchronizer.run();
+        std::cout << "=== Co-Simulation Complete ===" << std::endl;
+    } else {
+        std::cerr << "Failed to initialize synchronizer" << std::endl;
+        return 1;
     }
     
     return 0;
