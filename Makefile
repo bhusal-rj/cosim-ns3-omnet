@@ -12,10 +12,10 @@ BUILD_DIR = build
 INCLUDES = -I$(SRC_DIR)/common
 
 # Source files
-SOURCES = $(SRC_DIR)/common/message.cpp $(SRC_DIR)/common/config.cpp main.cpp
+SOURCES = $(SRC_DIR)/common/message.cpp $(SRC_DIR)/common/config.cpp $(SRC_DIR)/common/synchronizer.cpp main.cpp
 
 # Object files
-OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/config.o $(BUILD_DIR)/main.o
+OBJECTS = $(BUILD_DIR)/message.o $(BUILD_DIR)/config.o $(BUILD_DIR)/synchronizer.o $(BUILD_DIR)/main.o
 
 # Target executable
 TARGET = cosimulation
@@ -37,6 +37,10 @@ $(BUILD_DIR)/message.o: $(SRC_DIR)/common/message.cpp
 
 # Compile config.cpp
 $(BUILD_DIR)/config.o: $(SRC_DIR)/common/config.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile synchronizer.cpp
+$(BUILD_DIR)/synchronizer.o: $(SRC_DIR)/common/synchronizer.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile main.cpp
