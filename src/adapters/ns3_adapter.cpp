@@ -144,14 +144,18 @@ bool NS3Adapter::startNS3Process() {
     ns3ProcessId_ = fork();
     
     if (ns3ProcessId_ == 0) {
-        // Child process - execute NS-3
-        std::string command = "cd /usr/local/ns-allinone-3.39/ns-3.39 && ";
-        command += "./ns3 run '" + ns3ScriptPath_ + " --port=" + communicationPort_ + "'";
+        // Child process - execute NS-3 with waf
+        // Use your specific NS-3 path
+        std::string ns3Path = "/home/rajesh/ndnSIM/ns-3";
+        
+        // For waf-based NS-3 (which ndnSIM typically uses)
+        std::string command = "cd " + ns3Path + " && ";
+        command += "./waf --run 'cosim-script --port=" + communicationPort_ + "'";
         
         execl("/bin/sh", "sh", "-c", command.c_str(), (char*)NULL);
         
         // If we reach here, exec failed
-        std::cerr << "Failed to execute NS-3 command" << std::endl;
+        std::cerr << "Failed to execute NS-3 waf command" << std::endl;
         exit(1);
     } else if (ns3ProcessId_ > 0) {
         // Parent process
