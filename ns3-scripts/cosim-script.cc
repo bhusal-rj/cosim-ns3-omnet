@@ -18,16 +18,30 @@ This script runs within NS-3 and communicates with the co-simulation platform
 #include <sstream>
 #include <thread>
 #include <iomanip>
+#include <signal.h>  
+#include <errno.h>   
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("CoSimulationScript");
 
+// Global flag for graceful shutdown
+static volatile bool g_shutdown = false;
+
+// Signal handler for SIGPIPE
+void sigpipe_handler(int sig) {
+    NS_LOG_WARN("SIGPIPE received - connection broken");
+    g_shutdown = true;
+}
+
 class CoSimulationManager {
 public:
-    CoSimulationManager(int port) : m_port(port), m_running(true), m_socket(-1) {}
+    CoSimulationManager(int port) : m_port(port), m_running(true), m_socket(-1), m_connectionActive(false) {}
     
     void Initialize() {
+        // Install signal handler
+        signal(SIGPIPE, sigpipe_handler);
+        
         ConnectToCoSimulator();
         SetupSimulation();
     }
@@ -76,6 +90,7 @@ private:
             return;
         }
         
+        m_connectionActive = true;
         NS_LOG_INFO("Connected to co-simulation platform on port " << m_port);
     }
     
@@ -118,7 +133,20 @@ private:
     }
     
     void SendVehicleData() {
-        if (m_socket < 0) return;
+        // Check if we should shutdown
+        if (g_shutdown || !m_running || !m_connectionActive || m_socket < 0) {
+            NS_LOG_INFO("Stopping vehicle data transmission");
+            return;
+        }
+        
+        // Check if socket is still valid
+        int error = 0;
+        socklen_t len = sizeof(error);
+        if (getsockopt(m_socket, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0) {
+            NS_LOG_WARN("Socket error detected, stopping transmission");
+            m_connectionActive = false;
+            return;
+        }
         
         for (uint32_t i = 0; i < m_nodes.GetN(); ++i) {
             Ptr<MobilityModel> mob = m_nodes.Get(i)->GetObject<MobilityModel>();
@@ -135,20 +163,31 @@ private:
                 << vel.GetLength() << "," << heading << "," << Simulator::Now().GetSeconds() << "\n";
             
             std::string data = oss.str();
-            send(m_socket, data.c_str(), data.length(), 0);
+            
+            // Use MSG_NOSIGNAL to prevent SIGPIPE and check for errors
+            ssize_t sent = send(m_socket, data.c_str(), data.length(), MSG_NOSIGNAL);
+            if (sent < 0) {
+                if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
+                    NS_LOG_WARN("Connection broken while sending data, stopping transmission");
+                    m_connectionActive = false;
+                    return;
+                }
+            }
         }
         
-        // Schedule next update
-        if (m_running && Simulator::Now().GetSeconds() < 10.0) {  // Run for 10 seconds max
+        // Schedule next update only if connection is still active
+        if (m_running && m_connectionActive && !g_shutdown && Simulator::Now().GetSeconds() < 10.0) {
             Simulator::Schedule(Seconds(0.5), &CoSimulationManager::SendVehicleData, this);
+        } else {
+            NS_LOG_INFO("Ending vehicle data transmission");
         }
     }
     
     void CommunicationLoop() {
         char buffer[1024];
         
-        while (m_running) {
-            if (m_socket < 0) break;
+        while (m_running && !g_shutdown) {
+            if (m_socket < 0 || !m_connectionActive) break;
             
             memset(buffer, 0, sizeof(buffer));
             ssize_t bytes = recv(m_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
@@ -156,14 +195,26 @@ private:
             if (bytes > 0) {
                 std::string message(buffer, bytes);
                 ProcessCommand(message);
+            } else if (bytes == 0) {
+                // Connection closed by peer
+                NS_LOG_INFO("Connection closed by co-simulation platform");
+                m_connectionActive = false;
+                break;
+            } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                // Real error occurred
+                NS_LOG_WARN("Error in recv: " << strerror(errno));
+                m_connectionActive = false;
+                break;
             }
             
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        
+        NS_LOG_INFO("Communication loop ended");
     }
     
     void ProcessCommand(const std::string& message) {
-        NS_LOG_INFO("Received command: " << message.substr(0, 50) << "...");  // Truncate long messages
+        NS_LOG_INFO("Received command: " << message.substr(0, 50) << "...");
         
         if (message.find("STEP:") == 0) {
             // Extract time step
@@ -181,20 +232,26 @@ private:
         } else if (message.find("SHUTDOWN") == 0) {
             NS_LOG_INFO("Shutdown command received");
             m_running = false;
+            m_connectionActive = false;
             Simulator::Stop();
         }
     }
     
     void SendStepComplete() {
-        if (m_socket >= 0) {
+        if (m_socket >= 0 && m_connectionActive) {
             std::string response = "STEP_COMPLETE\n";
-            send(m_socket, response.c_str(), response.length(), 0);
+            ssize_t sent = send(m_socket, response.c_str(), response.length(), MSG_NOSIGNAL);
+            if (sent < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+                NS_LOG_WARN("Connection broken while sending step complete");
+                m_connectionActive = false;
+            }
         }
     }
     
     int m_port;
     bool m_running;
     int m_socket;
+    bool m_connectionActive;  // Add this flag
     NodeContainer m_nodes;
 };
 
