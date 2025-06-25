@@ -1,14 +1,15 @@
 /*
-NS-3 Co-simulation Script for ndnSIM
-This script runs within NS-3 and communicates with the co-simulation platform
+NS-3 Co-simulation Script that runs existing ndnSIM examples and extracts data
+This script integrates with existing ndnSIM simulations and sends data to OMNeT++
 */
 
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
-#include "ns3/mobility-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/applications-module.h"
-#include "ns3/wifi-module.h"
+#include "ns3/point-to-point-module.h"
+#include "ns3/ndnSIM-module.h"
+
+// Add specific include for ndn::App
+#include "ns3/ndnSIM/apps/ndn-app.hpp"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -22,6 +23,7 @@ This script runs within NS-3 and communicates with the co-simulation platform
 #include <errno.h>   
 
 using namespace ns3;
+using namespace ns3::ndn;
 
 NS_LOG_COMPONENT_DEFINE ("CoSimulationScript");
 
@@ -34,22 +36,88 @@ void sigpipe_handler(int sig) {
     g_shutdown = true;
 }
 
+// Data extraction callback class
+class NDNDataExtractor {
+public:
+    // Fix callback signatures - parameters should be in correct order for ndnSIM traces
+    static void OnInterestReceived(shared_ptr<const Interest> interest, Ptr<App> app, shared_ptr<Face> face) {
+        uint32_t nodeId = app->GetNode()->GetId();
+        std::string name = interest->getName().toUri();
+        double timestamp = Simulator::Now().GetSeconds();
+        
+        // Store interest data for co-simulation
+        std::ostringstream data;
+        data << "NDN_INTEREST," << nodeId << "," << name << "," << timestamp << "," 
+             << interest->getInterestLifetime().count() << "\n";
+        
+        // Send to co-simulation platform
+        SendToCoSimulation(data.str());
+    }
+    
+    static void OnDataReceived(shared_ptr<const Data> data, Ptr<App> app, shared_ptr<Face> face) {
+        uint32_t nodeId = app->GetNode()->GetId();
+        std::string name = data->getName().toUri();
+        double timestamp = Simulator::Now().GetSeconds();
+        size_t contentSize = data->getContent().size();
+        
+        // Store data packet info for co-simulation
+        std::ostringstream output;
+        output << "NDN_DATA," << nodeId << "," << name << "," << timestamp << "," << contentSize << "\n";
+        
+        // Send to co-simulation platform
+        SendToCoSimulation(output.str());
+    }
+    
+    static void OnInterestTimedOut(shared_ptr<const Interest> interest, Ptr<App> app) {
+        uint32_t nodeId = app->GetNode()->GetId();
+        std::string name = interest->getName().toUri();
+        double timestamp = Simulator::Now().GetSeconds();
+        
+        std::ostringstream data;
+        data << "NDN_TIMEOUT," << nodeId << "," << name << "," << timestamp << "\n";
+        
+        SendToCoSimulation(data.str());
+    }
+    
+    static void SendToCoSimulation(const std::string& data);
+    static void SetSocket(int socket, bool* active);
+    
+private:
+    static int s_socket;
+    static bool* s_active;
+};
+
+int NDNDataExtractor::s_socket = -1;
+bool* NDNDataExtractor::s_active = nullptr;
+
+void NDNDataExtractor::SetSocket(int socket, bool* active) {
+    s_socket = socket;
+    s_active = active;
+}
+
+void NDNDataExtractor::SendToCoSimulation(const std::string& data) {
+    if (s_socket >= 0 && s_active && *s_active) {
+        ssize_t sent = send(s_socket, data.c_str(), data.length(), MSG_NOSIGNAL);
+        if (sent < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+            *s_active = false;
+        }
+    }
+}
+
 class CoSimulationManager {
 public:
-    CoSimulationManager(int port) : m_port(port), m_running(true), m_socket(-1), m_connectionActive(false) {}
+    CoSimulationManager(int port, const std::string& example = "simple") 
+        : m_port(port), m_running(true), m_socket(-1), m_connectionActive(false), m_exampleType(example) {}
     
     void Initialize() {
-        // Install signal handler
         signal(SIGPIPE, sigpipe_handler);
-        
         ConnectToCoSimulator();
-        SetupSimulation();
+        SetupNDNSimulation();
     }
     
     void Run() {
-        NS_LOG_INFO("Starting co-simulation manager");
+        NS_LOG_INFO("Starting NDN co-simulation manager");
         
-        // Start the communication thread
         std::thread commThread(&CoSimulationManager::CommunicationLoop, this);
         
         // Run NS-3 simulation
@@ -80,7 +148,6 @@ private:
         server_addr.sin_port = htons(m_port);
         server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
         
-        // Wait for co-simulator to be ready
         sleep(2);
         
         if (connect(m_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
@@ -92,94 +159,218 @@ private:
         
         m_connectionActive = true;
         NS_LOG_INFO("Connected to co-simulation platform on port " << m_port);
+        
+        // Set socket for data extractor
+        NDNDataExtractor::SetSocket(m_socket, &m_connectionActive);
     }
     
-    void SetupSimulation() {
-        // Create nodes (vehicles)
-        NodeContainer nodes;
-        nodes.Create(3);  // Create 3 vehicles
-        
-        // Setup mobility model
-        MobilityHelper mobility;
-        mobility.SetPositionAllocator("ns3::GridPositionAllocator",
-                                     "MinX", DoubleValue(100.0),
-                                     "MinY", DoubleValue(50.0),
-                                     "DeltaX", DoubleValue(100.0),
-                                     "DeltaY", DoubleValue(50.0),
-                                     "GridWidth", UintegerValue(3),
-                                     "LayoutType", StringValue("RowFirst"));
-        
-        mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-        mobility.Install(nodes);
-        
-        // Set initial velocities for each vehicle
-        for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-            Ptr<ConstantVelocityMobilityModel> mob = nodes.Get(i)->GetObject<ConstantVelocityMobilityModel>();
-            // Different speeds and slight variations in direction
-            double speed = 15.0 + i * 3.0;  // 15, 18, 21 m/s
-            double angle = i * 10.0;        // 0, 10, 20 degrees
-            double radians = angle * M_PI / 180.0;
-            
-            Vector velocity(speed * cos(radians), speed * sin(radians), 0.0);
-            mob->SetVelocity(velocity);
+    void SetupNDNSimulation() {
+        // Choose which example to run based on command line parameter
+        if (m_exampleType == "grid") {
+            RunGridTopologyExample();
+        } else {
+            RunSimpleExample();
         }
         
+        // Schedule periodic statistics collection
+        Simulator::Schedule(Seconds(1.0), &CoSimulationManager::CollectStatistics, this);
+        
+        // Schedule simulation stop at 30 seconds
+        Simulator::Schedule(Seconds(30.0), &CoSimulationManager::StopSimulation, this);
+    }
+    
+    void StopSimulation() {
+        NS_LOG_INFO("Simulation time limit reached - stopping");
+        m_running = false;
+        m_connectionActive = false;
+        Simulator::Stop();
+    }
+    
+    void RunSimpleExample() {
+        // Create a simple 3-node topology
+        NodeContainer nodes;
+        nodes.Create(3);
+        
+        // Create point-to-point links
+        PointToPointHelper p2p;
+        p2p.SetDeviceAttribute("DataRate", StringValue("1Mbps"));
+        p2p.SetChannelAttribute("Delay", StringValue("10ms"));
+        
+        // Connect nodes: 0 <-> 1 <-> 2
+        NetDeviceContainer link1 = p2p.Install(nodes.Get(0), nodes.Get(1));
+        NetDeviceContainer link2 = p2p.Install(nodes.Get(1), nodes.Get(2));
+        
+        // Install NDN stack on all nodes
+        StackHelper ndnHelper;
+        ndnHelper.SetDefaultRoutes(true);
+        ndnHelper.InstallAll();
+        
+        // Choosing forwarding strategy
+        StrategyChoiceHelper::InstallAll("/prefix", "/localhost/nfd/strategy/multicast");
+        
+        // Consumer
+        AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
+        consumerHelper.SetPrefix("/prefix");
+        consumerHelper.SetAttribute("Frequency", StringValue("2")); // 2 interests per second
+        
+        ApplicationContainer consumerApp = consumerHelper.Install(nodes.Get(0));
+        
+        // Connect callbacks to extract data - fix callback signatures
+        consumerApp.Get(0)->TraceConnectWithoutContext("ReceivedDatas", 
+            MakeCallback(&NDNDataExtractor::OnDataReceived));
+        consumerApp.Get(0)->TraceConnectWithoutContext("TimedOutInterests", 
+            MakeCallback(&NDNDataExtractor::OnInterestTimedOut));
+        
+        // Producer
+        AppHelper producerHelper("ns3::ndn::Producer");
+        producerHelper.SetPrefix("/prefix");
+        producerHelper.SetAttribute("PayloadSize", StringValue("1024"));
+        
+        ApplicationContainer producerApp = producerHelper.Install(nodes.Get(2));
+        
+        // Connect callbacks
+        producerApp.Get(0)->TraceConnectWithoutContext("ReceivedInterests", 
+            MakeCallback(&NDNDataExtractor::OnInterestReceived));
+        
+        // Install global routing
+        GlobalRoutingHelper ndnGlobalRoutingHelper;
+        ndnGlobalRoutingHelper.InstallAll();
+        
+        ndnGlobalRoutingHelper.AddOrigins("/prefix", nodes.Get(2));
+        GlobalRoutingHelper::CalculateRoutes();
+        
+        // Store nodes
         m_nodes = nodes;
         
-        NS_LOG_INFO("Created " << nodes.GetN() << " vehicles with mobility");
+        NS_LOG_INFO("Setup simple NDN topology with " << m_nodes.GetN() << " nodes");
         
-        // Schedule periodic vehicle data updates
-        Simulator::Schedule(Seconds(0.1), &CoSimulationManager::SendVehicleData, this);
+        // Send initial simulation info to co-simulation
+        std::ostringstream info;
+        info << "NDN_SIM_STARTED:Nodes=" << m_nodes.GetN() 
+             << ",Consumer=Node0,Producer=Node2,Duration=30s\n";
+        NDNDataExtractor::SendToCoSimulation(info.str());
     }
     
-    void SendVehicleData() {
-        // Check if we should shutdown
-        if (g_shutdown || !m_running || !m_connectionActive || m_socket < 0) {
-            NS_LOG_INFO("Stopping vehicle data transmission");
+    void RunGridTopologyExample() {
+        NS_LOG_INFO("Setting up Grid Topology Example");
+        
+        // Check if topology file exists first
+        std::string topoFile = "src/ndnSIM/examples/topologies/topo-grid-3x3.txt";
+        std::ifstream file(topoFile);
+        if (!file.good()) {
+            NS_LOG_ERROR("Grid topology file not found: " << topoFile);
+            NS_LOG_INFO("Falling back to simple example");
+            RunSimpleExample();
             return;
         }
+        file.close();
         
-        // Check if socket is still valid
-        int error = 0;
-        socklen_t len = sizeof(error);
-        if (getsockopt(m_socket, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0) {
-            NS_LOG_WARN("Socket error detected, stopping transmission");
-            m_connectionActive = false;
-            return;
-        }
+        // Create 3x3 grid topology
+        AnnotatedTopologyReader topologyReader("", 25);
+        topologyReader.SetFileName(topoFile);
+        topologyReader.Read();
         
-        for (uint32_t i = 0; i < m_nodes.GetN(); ++i) {
-            Ptr<MobilityModel> mob = m_nodes.Get(i)->GetObject<MobilityModel>();
-            Vector pos = mob->GetPosition();
-            Vector vel = mob->GetVelocity();
-            
-            // Calculate heading from velocity
-            double heading = atan2(vel.y, vel.x) * 180.0 / M_PI;
-            if (heading < 0) heading += 360.0;
-            
-            std::ostringstream oss;
-            oss << "VEHICLE_DATA:ns3_vehicle_" << std::setfill('0') << std::setw(3) << i << ","
-                << pos.x << "," << pos.y << "," << pos.z << ","
-                << vel.GetLength() << "," << heading << "," << Simulator::Now().GetSeconds() << "\n";
-            
-            std::string data = oss.str();
-            
-            // Use MSG_NOSIGNAL to prevent SIGPIPE and check for errors
-            ssize_t sent = send(m_socket, data.c_str(), data.length(), MSG_NOSIGNAL);
-            if (sent < 0) {
-                if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
-                    NS_LOG_WARN("Connection broken while sending data, stopping transmission");
-                    m_connectionActive = false;
-                    return;
+        // Install NDN stack
+        StackHelper ndnHelper;
+        ndnHelper.InstallAll();
+        
+        // Choosing forwarding strategy
+        StrategyChoiceHelper::InstallAll("/prefix", "/localhost/nfd/strategy/multicast");
+        
+        // Install applications
+        AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
+        consumerHelper.SetPrefix("/prefix");
+        consumerHelper.SetAttribute("Frequency", StringValue("5")); // 5 interests per second
+        
+        // Install consumers on leaf nodes (corner and edge nodes)
+        ApplicationContainer consumerApps;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (i == 0 || i == 2 || j == 0 || j == 2) { // leaf nodes
+                    std::string nodeName = "Node" + std::to_string(i) + std::to_string(j);
+                    Ptr<Node> node = Names::Find<Node>(nodeName);
+                    if (node) {
+                        ApplicationContainer app = consumerHelper.Install(node);
+                        consumerApps.Add(app);
+                        
+                        // Connect callbacks to extract data
+                        app.Get(0)->TraceConnectWithoutContext("ReceivedDatas", 
+                            MakeCallback(&NDNDataExtractor::OnDataReceived));
+                        app.Get(0)->TraceConnectWithoutContext("TimedOutInterests", 
+                            MakeCallback(&NDNDataExtractor::OnInterestTimedOut));
+                    }
                 }
             }
         }
         
-        // Schedule next update only if connection is still active
-        if (m_running && m_connectionActive && !g_shutdown && Simulator::Now().GetSeconds() < 10.0) {
-            Simulator::Schedule(Seconds(0.5), &CoSimulationManager::SendVehicleData, this);
-        } else {
-            NS_LOG_INFO("Ending vehicle data transmission");
+        // Producer on center node
+        AppHelper producerHelper("ns3::ndn::Producer");
+        producerHelper.SetPrefix("/prefix");
+        producerHelper.SetAttribute("PayloadSize", StringValue("1024"));
+        
+        Ptr<Node> centerNode = Names::Find<Node>("Node11");
+        if (centerNode) {
+            ApplicationContainer producerApp = producerHelper.Install(centerNode);
+            
+            // Connect callbacks
+            producerApp.Get(0)->TraceConnectWithoutContext("ReceivedInterests", 
+                MakeCallback(&NDNDataExtractor::OnInterestReceived));
+        }
+        
+        // Install global routing
+        GlobalRoutingHelper ndnGlobalRoutingHelper;
+        ndnGlobalRoutingHelper.InstallAll();
+        
+        ndnGlobalRoutingHelper.AddOrigins("/prefix", centerNode);
+        GlobalRoutingHelper::CalculateRoutes();
+        
+        // Store all nodes
+        m_nodes = NodeContainer::GetGlobal();
+        
+        NS_LOG_INFO("Setup Grid NDN topology with " << m_nodes.GetN() << " nodes");
+        
+        // Send initial simulation info to co-simulation
+        std::ostringstream info;
+        info << "NDN_SIM_STARTED:Topology=Grid3x3,Nodes=" << m_nodes.GetN() 
+             << ",Consumers=" << consumerApps.GetN() << ",Producer=Node11,Duration=30s\n";
+        NDNDataExtractor::SendToCoSimulation(info.str());
+    }
+    
+    void CollectStatistics() {
+        if (!m_connectionActive || g_shutdown) return;
+        
+        // Collect node statistics - simplified version
+        std::ostringstream stats;
+        stats << "NDN_NODE_STATS:Time=" << Simulator::Now().GetSeconds();
+        
+        for (uint32_t i = 0; i < m_nodes.GetN(); ++i) {
+            Ptr<Node> node = m_nodes.Get(i);
+            
+            // Basic node information
+            stats << ",Node" << i << "_Id=" << node->GetId();
+            
+            // Check if node has applications
+            uint32_t nApps = node->GetNApplications();
+            stats << ",Node" << i << "_Apps=" << nApps;
+            
+            // Get device information
+            uint32_t nDevices = node->GetNDevices();
+            stats << ",Node" << i << "_Devices=" << nDevices;
+        }
+        stats << "\n";
+        
+        std::string data = stats.str();
+        ssize_t sent = send(m_socket, data.c_str(), data.length(), MSG_NOSIGNAL);
+        if (sent < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+            m_connectionActive = false;
+            return;
+        }
+        
+        NS_LOG_INFO("Sent statistics: " << data.substr(0, 100) << "...");
+        
+        // Schedule next collection
+        if (m_running && m_connectionActive && Simulator::Now().GetSeconds() < 30.0) {
+            Simulator::Schedule(Seconds(2.0), &CoSimulationManager::CollectStatistics, this);
         }
     }
     
@@ -196,12 +387,10 @@ private:
                 std::string message(buffer, bytes);
                 ProcessCommand(message);
             } else if (bytes == 0) {
-                // Connection closed by peer
                 NS_LOG_INFO("Connection closed by co-simulation platform");
                 m_connectionActive = false;
                 break;
             } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                // Real error occurred
                 NS_LOG_WARN("Error in recv: " << strerror(errno));
                 m_connectionActive = false;
                 break;
@@ -217,17 +406,9 @@ private:
         NS_LOG_INFO("Received command: " << message.substr(0, 50) << "...");
         
         if (message.find("STEP:") == 0) {
-            // Extract time step
             double timeStep = std::stod(message.substr(5));
             NS_LOG_INFO("Step command for " << timeStep << " seconds");
-            
-            // Send response immediately for now
             SendStepComplete();
-            
-        } else if (message.find("UPDATE_VEHICLE:") == 0) {
-            // Process external vehicle updates
-            std::string vehicleData = message.substr(15);
-            NS_LOG_INFO("External vehicle update: " << vehicleData.substr(0, 30) << "...");
             
         } else if (message.find("SHUTDOWN") == 0) {
             NS_LOG_INFO("Shutdown command received");
@@ -238,34 +419,48 @@ private:
     }
     
     void SendStepComplete() {
-        if (m_socket >= 0 && m_connectionActive) {
-            std::string response = "STEP_COMPLETE\n";
-            ssize_t sent = send(m_socket, response.c_str(), response.length(), MSG_NOSIGNAL);
-            if (sent < 0 && (errno == EPIPE || errno == ECONNRESET)) {
-                NS_LOG_WARN("Connection broken while sending step complete");
-                m_connectionActive = false;
-            }
+        if (m_socket < 0 || !m_connectionActive) return;
+        
+        std::string response = "NDN_STEP_COMPLETE\n";
+        ssize_t sent = send(m_socket, response.c_str(), response.length(), MSG_NOSIGNAL);
+        if (sent < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+            m_connectionActive = false;
         }
+        
+        NS_LOG_INFO("Sent step complete notification");
     }
-    
+
     int m_port;
     bool m_running;
     int m_socket;
-    bool m_connectionActive;  // Add this flag
+    bool m_connectionActive;
     NodeContainer m_nodes;
+    std::string m_exampleType;  // Add example type
 };
 
 int main(int argc, char *argv[]) {
     CommandLine cmd;
     int port = 9999;
+    std::string example = "simple";  // Default to simple
+    
     cmd.AddValue("port", "Communication port", port);
+    cmd.AddValue("example", "NDN example type: simple or grid", example);
     cmd.Parse(argc, argv);
     
+    // Validate example type
+    if (example != "simple" && example != "grid") {
+        std::cerr << "Error: Unknown example type '" << example << "'. Use 'simple' or 'grid'." << std::endl;
+        return 1;
+    }
+    
     LogComponentEnable("CoSimulationScript", LOG_LEVEL_INFO);
+    LogComponentEnable("ndn.Consumer", LOG_LEVEL_INFO);
+    LogComponentEnable("ndn.Producer", LOG_LEVEL_INFO);
     
-    NS_LOG_INFO("Starting NS-3 Co-simulation Script on port " << port);
+    NS_LOG_INFO("Starting NDN Co-simulation Script");
+    NS_LOG_INFO("Port: " << port << ", Example: " << example);
     
-    CoSimulationManager manager(port);
+    CoSimulationManager manager(port, example);
     manager.Initialize();
     manager.Run();
     
