@@ -28,6 +28,23 @@ struct VehicleInfo {
     double timestamp;
 };
 
+// NDN Metrics structure from methodology
+struct NDNMetrics {
+    uint32_t pitSize = 0;
+    uint32_t fibEntries = 0;
+    double cacheHitRatio = 0.0;
+    uint64_t interestCount = 0;
+    uint64_t dataCount = 0;
+    double avgLatency = 0.0;
+    uint32_t unsatisfiedInterests = 0;
+    double timestamp = 0.0;
+    
+    // Additional V2X metrics
+    uint32_t emergencyMessages = 0;
+    uint32_t safetyMessages = 0;
+    double networkUtilization = 0.0;
+};
+
 class Message {
 public:
     Message(MessageType type, double timestamp);
