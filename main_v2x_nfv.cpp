@@ -10,6 +10,8 @@ Based on simulation methodology document
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 // Core co-simulation components
 #include "src/common/config.h"
@@ -43,6 +45,27 @@ void printUsage(const char* programName) {
               << "\nTraffic scenarios (Kathmandu intersection):\n"
               << "  light: 2-10 vehicles, normal: 10-25 vehicles, heavy: 25-50 vehicles\n"
               << std::endl;
+}
+
+bool findAvailablePort(int& port) {
+    for (int testPort = port; testPort < port + 20; testPort++) {
+        int testSocket = socket(AF_INET, SOCK_STREAM, 0);
+        if (testSocket < 0) continue;
+        
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(testPort);
+        
+        int result = bind(testSocket, (struct sockaddr*)&addr, sizeof(addr));
+        close(testSocket);
+        
+        if (result == 0) {
+            port = testPort;
+            return true;
+        }
+    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
@@ -124,12 +147,25 @@ int main(int argc, char* argv[]) {
         std::unique_ptr<SimulatorInterface> orchestrator;  // OMNeT++ (Leader)
         std::unique_ptr<SimulatorInterface> ndnSimulator;  // NS-3 (Follower)
         
+        // Dynamic port allocation
+        int dynamicPort = 9999;
+        if (!findAvailablePort(dynamicPort)) {
+            std::cerr << "❌ No available ports found" << std::endl;
+            return 1;
+        }
+        std::cout << "✅ Using port: " << dynamicPort << std::endl;
+        
         // Initialize OMNeT++ Orchestrator (Leader)
         if (useRealOMNeT) {
             std::cout << "\n=== Initializing OMNeT++ NFV Orchestrator (Leader) ===" << std::endl;
             auto omnetOrch = std::make_unique<OMNeTOrchestrator>();
             omnetOrch->setTrafficDensity(trafficDensity);
             omnetOrch->setScenarioType(useKathmanduScenario ? "kathmandu_intersection" : "generic");
+            // Start as leader with dynamic port
+            if (!omnetOrch->startAsLeader(dynamicPort)) {
+                std::cerr << "❌ Failed to start OMNeT++ orchestrator as leader" << std::endl;
+                return 1;
+            }
             orchestrator = std::move(omnetOrch);
         } else {
             std::cout << "\n=== Using Mock OMNeT++ Orchestrator (Leader) ===" << std::endl;

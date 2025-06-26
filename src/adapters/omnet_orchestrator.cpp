@@ -576,27 +576,32 @@ bool OMNeTOrchestrator::deployVNF(VNFType type, const std::string& location) {
 
 CoSimMessage OMNeTOrchestrator::receiveMessage(int socket) {
     CoSimMessage message;
-    
-    // Simple message receiving (implementation depends on message format)
     char buffer[4096];
-    ssize_t bytesReceived = recv(socket, buffer, sizeof(buffer) - 1, 0);
+    
+    ssize_t bytesReceived = recv(socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
     
     if (bytesReceived > 0) {
         buffer[bytesReceived] = '\0';
-        
-        // Parse the message (simplified version)
         std::string data(buffer);
-        if (data.find("NDN_METRICS") != std::string::npos) {
-            message.type = CoSimMessage::NDN_METRICS;
-            message.payload = data;
-        } else if (data.find("TIME_SYNC") != std::string::npos) {
-            message.type = CoSimMessage::TIME_SYNC;
-            message.payload = data;
-        } else {
-            message.type = CoSimMessage::VEHICLE_UPDATE;
-            message.payload = data;
+        
+        // Parse JSON message
+        Json::Value json;
+        Json::CharReaderBuilder builder;
+        std::string errors;
+        std::istringstream stream(data);
+        
+        if (Json::parseFromStream(builder, stream, &json, &errors)) {
+            std::string type = json.get("type", "").asString();
+            
+            if (type == "NDN_METRICS") {
+                message.type = CoSimMessage::NDN_METRICS;
+                message.payload = data;
+                message.timestamp = json.get("timestamp", 0.0).asDouble();
+            } else if (type == "TIME_SYNC_ACK") {
+                message.type = CoSimMessage::TIME_SYNC;
+                message.timestamp = json.get("timestamp", 0.0).asDouble();
+            }
         }
-        message.timestamp = currentTime_.load();
     }
     
     return message;

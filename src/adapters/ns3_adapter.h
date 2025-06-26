@@ -194,8 +194,12 @@ public:
     // Follower-specific methods (ndnSIM as follower)
     bool connectToLeader(const std::string& address = "127.0.0.1", int port = 9999);
     bool sendMetricsToLeader(const NDNMetrics& metrics);
+    void sendMetricsToLeader(); // Overloaded method without parameters
     bool sendAckToLeader();
     void handleLeaderCommand(const std::string& command);
+    
+    // Method to update NDN statistics from callbacks
+    void updateNDNStats(const std::string& event, double latency = 0.0);
     
     // NS-3 example configuration
     void setNS3Example(const std::string& example) { ns3Example_ = example; }
@@ -261,6 +265,20 @@ private:
     // NDN metrics collection
     mutable std::mutex metricsMutex_;
     NDNMetrics lastMetrics_;
+    
+    // NDN Statistics structure for internal tracking
+    struct NDNStatistics {
+        uint64_t pendingInterests = 0;
+        uint64_t cacheHits = 0;
+        uint64_t timeouts = 0;
+        uint64_t interests = 0;
+        uint64_t dataPackets = 0;
+        uint64_t satisfiedInterests = 0;
+        double totalLatency = 0.0;
+    };
+    
+    NDNStatistics ndnStats_;
+    int leaderSocket_ = -1;
     
     // Statistics and monitoring
     struct SimulationStats {

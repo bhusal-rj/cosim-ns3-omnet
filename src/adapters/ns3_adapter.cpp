@@ -13,6 +13,7 @@ Independent implementation inspired by ns3-cosim for V2X-NDN-NFV platform
 #include <arpa/inet.h>
 #include <signal.h>
 #include <cstring>
+#include <jsoncpp/json/json.h>
 
 #include <chrono>
 
@@ -723,6 +724,51 @@ void NS3Adapter::printStats() const {
     stats_.print();
 }
 
+NDNMetrics NS3Adapter::collectNDNMetrics() const {
+    std::lock_guard<std::mutex> lock(metricsMutex_);
+    
+    NDNMetrics metrics;
+    metrics.timestamp = getCurrentTime();
+    
+    // Map internal statistics to NDNMetrics structure (match message.h fields)
+    metrics.pitSize = ndnStats_.pendingInterests;
+    metrics.cacheHitRatio = (ndnStats_.interests > 0) 
+                           ? static_cast<double>(ndnStats_.cacheHits) / ndnStats_.interests : 0.0;
+    metrics.avgLatency = (ndnStats_.totalLatency > 0 && ndnStats_.satisfiedInterests > 0) 
+                        ? ndnStats_.totalLatency / ndnStats_.satisfiedInterests : 0.0;
+    metrics.interestCount = ndnStats_.interests;
+    metrics.dataCount = ndnStats_.dataPackets;
+    metrics.unsatisfiedInterests = ndnStats_.timeouts;
+    
+    return metrics;
+}
+
+void NS3Adapter::sendMetricsToLeader() {
+    if (leaderSocket_ < 0) return;
+    
+    NDNMetrics metrics = collectNDNMetrics();
+    
+    // Create JSON message
+    Json::Value json;
+    json["type"] = "NDN_METRICS";
+    json["timestamp"] = metrics.timestamp;
+    json["pit_size"] = static_cast<Json::UInt>(metrics.pitSize);
+    json["avg_latency"] = metrics.avgLatency;
+    json["unsatisfied_interests"] = static_cast<Json::UInt>(metrics.unsatisfiedInterests);
+    json["interest_count"] = static_cast<Json::UInt64>(metrics.interestCount);
+    json["data_count"] = static_cast<Json::UInt64>(metrics.dataCount);
+    json["cache_hit_ratio"] = metrics.cacheHitRatio;
+    json["fib_entries"] = static_cast<Json::UInt>(metrics.fibEntries);
+    json["emergency_messages"] = static_cast<Json::UInt>(metrics.emergencyMessages);
+    json["safety_messages"] = static_cast<Json::UInt>(metrics.safetyMessages);
+    json["network_utilization"] = metrics.networkUtilization;
+    
+    Json::StreamWriterBuilder builder;
+    std::string message = Json::writeString(builder, json) + "\n";
+    
+    send(leaderSocket_, message.c_str(), message.length(), MSG_NOSIGNAL);
+}
+
 void NS3Adapter::SimulationStats::print() const {
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - startTime);
@@ -736,6 +782,30 @@ void NS3Adapter::SimulationStats::print() const {
     std::cout << "NDN Interests: " << ndnInterests << std::endl;
     std::cout << "NDN Data: " << ndnData << std::endl;
     std::cout << "=============================" << std::endl;
+}
+
+// Method to update NDN statistics from callbacks
+void NS3Adapter::updateNDNStats(const std::string& event, double latency) {
+    std::lock_guard<std::mutex> lock(metricsMutex_);
+    
+    if (event == "INTEREST_SENT") {
+        ndnStats_.interests++;
+        ndnStats_.pendingInterests++;
+    } else if (event == "DATA_RECEIVED") {
+        ndnStats_.dataPackets++;
+        ndnStats_.satisfiedInterests++;
+        ndnStats_.totalLatency += latency;
+        if (ndnStats_.pendingInterests > 0) {
+            ndnStats_.pendingInterests--;
+        }
+    } else if (event == "TIMEOUT") {
+        ndnStats_.timeouts++;
+        if (ndnStats_.pendingInterests > 0) {
+            ndnStats_.pendingInterests--;
+        }
+    } else if (event == "CACHE_HIT") {
+        ndnStats_.cacheHits++;
+    }
 }
 
 } // namespace cosim
