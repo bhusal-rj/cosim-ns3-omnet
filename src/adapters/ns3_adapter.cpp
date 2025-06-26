@@ -730,14 +730,13 @@ NDNMetrics NS3Adapter::collectNDNMetrics() const {
     NDNMetrics metrics;
     metrics.timestamp = getCurrentTime();
     metrics.pitSize = ndnStats_.pendingInterests;
-    metrics.cacheHits = ndnStats_.cacheHits;
     metrics.avgLatency = (ndnStats_.totalLatency > 0 && ndnStats_.satisfiedInterests > 0) 
                         ? ndnStats_.totalLatency / ndnStats_.satisfiedInterests : 0.0;
-    metrics.packetLoss = ndnStats_.timeouts;
     metrics.interestCount = ndnStats_.interests;
     metrics.dataCount = ndnStats_.dataPackets;
     metrics.cacheHitRatio = (ndnStats_.interests > 0) 
                            ? static_cast<double>(ndnStats_.cacheHits) / ndnStats_.interests : 0.0;
+    metrics.unsatisfiedInterests = ndnStats_.timeouts;
     
     return metrics;
 }
@@ -751,12 +750,12 @@ void NS3Adapter::sendMetricsToLeader() {
     json["type"] = "NDN_METRICS";
     json["timestamp"] = metrics.timestamp;
     json["pit_size"] = metrics.pitSize;
-    json["cache_hits"] = metrics.cacheHits;
-    json["avg_latency"] = metrics.avgLatency;
-    json["packet_loss"] = metrics.packetLoss;
-    json["interest_count"] = metrics.interestCount;
-    json["data_count"] = metrics.dataCount;
     json["cache_hit_ratio"] = metrics.cacheHitRatio;
+    json["avg_latency"] = metrics.avgLatency;
+    json["unsatisfied_interests"] = metrics.unsatisfiedInterests;
+    json["interest_count"] = static_cast<Json::UInt64>(metrics.interestCount);
+    json["data_count"] = static_cast<Json::UInt64>(metrics.dataCount);
+    json["fib_entries"] = metrics.fibEntries;
     
     Json::StreamWriterBuilder builder;
     std::string message = Json::writeString(builder, json) + "\n";

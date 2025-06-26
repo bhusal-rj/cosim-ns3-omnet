@@ -1,28 +1,28 @@
-// Create ns3-scripts/real-ndnsim-launcher.cc
+// Simple Real NDN Simulator Launcher - V2X Integration
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ndnSIM-module.h"
-#include "ns3/point-to-point-module.h"
 #include "ns3/mobility-module.h"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <jsoncpp/json/json.h>
 #include <unistd.h>
+#include <iostream>
+#include <sstream>
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("RealNDNSimLauncher");
+NS_LOG_COMPONENT_DEFINE("SimpleRealNDNSimLauncher");
 
-class RealNDNSimLauncher {
+class SimpleRealNDNSimLauncher {
 private:
     int leaderSocket_;
     bool connected_;
     NodeContainer nodes_;
     
 public:
-    RealNDNSimLauncher() : leaderSocket_(-1), connected_(false) {}
+    SimpleRealNDNSimLauncher() : leaderSocket_(-1), connected_(false) {}
     
     bool connectToLeader(const std::string& address, int port) {
         leaderSocket_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,7 +37,7 @@ public:
         for (int i = 0; i < 10; i++) {
             if (connect(leaderSocket_, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == 0) {
                 connected_ = true;
-                std::cout << "Connected to OMNeT++ leader" << std::endl;
+                std::cout << "✅ Connected to OMNeT++ leader" << std::endl;
                 return true;
             }
             sleep(2);
@@ -45,81 +45,61 @@ public:
         return false;
     }
     
-    void setupKathmanduScenario() {
-        // Create intersection topology
-        nodes_.Create(15); // 4 RSUs + 11 vehicles
+    void setupSimpleScenario() {
+        // Create simple intersection topology
+        nodes_.Create(10); // Simple node setup
         
         // Install NDN stack
-        ndn::StackHelper ndnHelper;
+        ns3::ndn::StackHelper ndnHelper;
         ndnHelper.InstallAll();
         
-        // Setup V2X applications
-        ndn::AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
+        // Setup simple V2X applications
+        ns3::ndn::AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
         consumerHelper.SetPrefix("/kathmandu/intersection");
         consumerHelper.SetAttribute("Frequency", StringValue("2"));
         
-        // Install on vehicle nodes (manually add individual nodes)
-        for (uint32_t i = 4; i < nodes_.GetN(); i++) {
+        // Install on some nodes
+        for (uint32_t i = 0; i < 5; i++) {
             consumerHelper.Install(nodes_.Get(i));
         }
         
-        // Producer on RSU
-        ndn::AppHelper producerHelper("ns3::ndn::Producer");
+        // Producer on one node
+        ns3::ndn::AppHelper producerHelper("ns3::ndn::Producer");
         producerHelper.SetPrefix("/kathmandu/intersection");
-        producerHelper.Install(nodes_.Get(0)); // Central RSU
+        producerHelper.Install(nodes_.Get(9));
         
-        // Setup mobility for vehicles
+        // Basic mobility
         MobilityHelper mobility;
         mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
-                                 "Bounds", RectangleValue(Rectangle(-500, 500, -500, 500)));
+                                 "Bounds", RectangleValue(Rectangle(-200, 200, -200, 200)));
+        mobility.Install(nodes_);
         
-        // Install mobility on vehicle nodes individually
-        for (uint32_t i = 4; i < nodes_.GetN(); i++) {
-            mobility.Install(nodes_.Get(i));
-        }
-        
-        // Fixed positions for RSUs
-        Ptr<ListPositionAllocator> rsuPositions = CreateObject<ListPositionAllocator>();
-        rsuPositions->Add(Vector(0, 0, 0));      // Central
-        rsuPositions->Add(Vector(0, 200, 0));    // North
-        rsuPositions->Add(Vector(200, 0, 0));    // East  
-        rsuPositions->Add(Vector(0, -200, 0));   // South
-        
-        mobility.SetPositionAllocator(rsuPositions);
-        mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-        for (uint32_t i = 0; i < 4; i++) {
-            mobility.Install(nodes_.Get(i));
-        }
+        std::cout << "✅ Scenario setup complete" << std::endl;
     }
     
     void sendMetrics() {
         if (!connected_) return;
         
-        // Collect simplified NDN metrics (avoiding problematic APIs)
-        Json::Value metrics;
-        metrics["type"] = "NDN_METRICS";
-        metrics["timestamp"] = Simulator::Now().GetSeconds();
+        // Send simplified text-based metrics
+        std::ostringstream oss;
+        oss << "NDN_METRICS,"
+            << Simulator::Now().GetSeconds() << ","
+            << static_cast<int>(nodes_.GetN()) << ","
+            << 50 << ","  // Simulated PIT size
+            << static_cast<int>(Simulator::Now().GetSeconds() * 10) << "\n";
         
-        // Use simpler metrics collection to avoid compilation issues
-        metrics["node_count"] = static_cast<int>(nodes_.GetN());
-        metrics["pit_size"] = 50; // Simulated value
-        metrics["active_faces"] = 20; // Simulated value
-        metrics["interests_sent"] = static_cast<int>(Simulator::Now().GetSeconds() * 10);
-        
-        Json::StreamWriterBuilder builder;
-        std::string message = Json::writeString(builder, metrics) + "\n";
-        
+        std::string message = oss.str();
         send(leaderSocket_, message.c_str(), message.length(), 0);
         
         // Schedule next metrics collection
-        Simulator::Schedule(Seconds(0.5), &RealNDNSimLauncher::sendMetrics, this);
+        Simulator::Schedule(Seconds(0.5), &SimpleRealNDNSimLauncher::sendMetrics, this);
     }
     
     void run(double simTime) {
-        setupKathmanduScenario();
+        setupSimpleScenario();
         
         // Start metrics collection
-        Simulator::Schedule(Seconds(1.0), &RealNDNSimLauncher::sendMetrics, this);
+        Simulator::Schedule(Seconds(1.0), &SimpleRealNDNSimLauncher::sendMetrics, this);
         
         // Run simulation
         Simulator::Stop(Seconds(simTime));
@@ -143,7 +123,7 @@ int main(int argc, char* argv[]) {
     cmd.AddValue("time", "Simulation time", simTime);
     cmd.Parse(argc, argv);
     
-    RealNDNSimLauncher launcher;
+    SimpleRealNDNSimLauncher launcher;
     
     std::cout << "🔗 Connecting to OMNeT++ leader at " << leaderAddress << ":" << leaderPort << std::endl;
     

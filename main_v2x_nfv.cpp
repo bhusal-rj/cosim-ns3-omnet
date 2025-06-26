@@ -1,5 +1,16 @@
 /*
-V2X-NDN-NFV Co-simulation Platform Main Entry Point
+V2X-NDN-NFV Co-simulation Pl    std::cout << "Usage: " << programName << " [options]\n"
+              << "Options:\n"
+              << "  --real-ns3              Use real NS-3/ndnSIM simulation\n"
+              << "  --real-omnet            Use real OMNeT++ orchestrator\n"
+              << "  --ns3-example <n>    NS-3 example to run (default: ndn-grid)\n"
+              << "  --omnet-config <cfg>    OMNeT++ configuration (default: KathmanduV2X)\n"
+              << "  --traffic <density>     Traffic density: light|normal|heavy (default: normal)\n"
+              << "  --sim-time <seconds>    Simulation duration (default: 120)\n"
+              << "  --sync-interval <ms>    Sync interval in ms (default: 100)\n"
+              << "  --port <port>           Server port for leader-follower communication (default: auto)\n"
+              << "  --kathmandu             Use Kathmandu intersection scenario\n"
+              << "  --help                  Show this help\n" Entry Point
 Implements Leader-Follower architecture with OMNeT++ as time master
 Based on simulation methodology document
 */
@@ -81,6 +92,7 @@ int main(int argc, char* argv[]) {
     std::string trafficDensity = "normal";
     double simulationTime = 120.0;  // 2 minutes as per methodology
     double syncInterval = 0.1;      // 100ms for V2X requirements
+    int serverPort = 0;             // 0 means auto-allocate
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -113,6 +125,10 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--sync-interval" && i + 1 < argc) {
             syncInterval = std::stod(argv[++i]) / 1000.0; // Convert ms to seconds
             std::cout << "✓ Sync interval: " << (syncInterval * 1000) << "ms" << std::endl;
+            
+        } else if (arg == "--port" && i + 1 < argc) {
+            serverPort = std::stoi(argv[++i]);
+            std::cout << "✓ Server port: " << serverPort << std::endl;
             
         } else if (arg == "--kathmandu") {
             useKathmanduScenario = true;
@@ -148,8 +164,8 @@ int main(int argc, char* argv[]) {
         std::unique_ptr<SimulatorInterface> ndnSimulator;  // NS-3 (Follower)
         
         // Dynamic port allocation
-        int dynamicPort = 9999;
-        if (!findAvailablePort(dynamicPort)) {
+        int dynamicPort = (serverPort > 0) ? serverPort : 9999;
+        if (serverPort == 0 && !findAvailablePort(dynamicPort)) {
             std::cerr << "❌ No available ports found" << std::endl;
             return 1;
         }

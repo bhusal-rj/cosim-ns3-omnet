@@ -37,11 +37,14 @@ sleep 5
 
 # Step 3: Copy ndnSIM script and launch
 echo "📋 Preparing ndnSIM script..."
-cp ns3-scripts/real-ndnsim-launcher.cc ~/ndnSIM/ns-3/scratch/
+cp ns3-scripts/simple-real-ndnsim-launcher.cc ~/ndnSIM/ns-3/scratch/
 
 echo "🔬 Starting ndnSIM Follower..."
 cd ~/ndnSIM/ns-3
-./waf --run "real-ndnsim-launcher --leader=$AVAILABLE_PORT --time=120"
+# Move problematic scripts temporarily to avoid build errors
+mv scratch/real-ndnsim-launcher.cc scratch/real-ndnsim-launcher.cc.bak 2>/dev/null || true
+mv scratch/v2x-ndn-nfv-cosim.cc scratch/v2x-ndn-nfv-cosim.cc.bak 2>/dev/null || true
+./waf --run "simple-real-ndnsim-launcher --leader=127.0.0.1 --port=$AVAILABLE_PORT --time=120"
 
 # Wait for completion
 wait $LEADER_PID
