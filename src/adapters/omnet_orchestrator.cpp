@@ -584,7 +584,6 @@ CoSimMessage OMNeTOrchestrator::receiveMessage(int socket) {
         buffer[bytesReceived] = '\0';
         std::string data(buffer);
         
-        // Parse JSON message
         Json::Value json;
         Json::CharReaderBuilder builder;
         std::string errors;
@@ -597,9 +596,15 @@ CoSimMessage OMNeTOrchestrator::receiveMessage(int socket) {
                 message.type = CoSimMessage::NDN_METRICS;
                 message.payload = data;
                 message.timestamp = json.get("timestamp", 0.0).asDouble();
+                
+                // Parse and handle metrics immediately
+                NDNMetrics metrics = parseNDNMetrics(data);
+                handleFollowerMetrics(metrics);
+                
             } else if (type == "TIME_SYNC_ACK") {
                 message.type = CoSimMessage::TIME_SYNC;
-                message.timestamp = json.get("timestamp", 0.0).asDouble();
+                syncAckReceived_ = true;
+                syncCondition_.notify_one();
             }
         }
     }

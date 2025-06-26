@@ -729,16 +729,15 @@ NDNMetrics NS3Adapter::collectNDNMetrics() const {
     
     NDNMetrics metrics;
     metrics.timestamp = getCurrentTime();
-    
-    // Map internal statistics to NDNMetrics structure (match message.h fields)
     metrics.pitSize = ndnStats_.pendingInterests;
-    metrics.cacheHitRatio = (ndnStats_.interests > 0) 
-                           ? static_cast<double>(ndnStats_.cacheHits) / ndnStats_.interests : 0.0;
+    metrics.cacheHits = ndnStats_.cacheHits;
     metrics.avgLatency = (ndnStats_.totalLatency > 0 && ndnStats_.satisfiedInterests > 0) 
                         ? ndnStats_.totalLatency / ndnStats_.satisfiedInterests : 0.0;
+    metrics.packetLoss = ndnStats_.timeouts;
     metrics.interestCount = ndnStats_.interests;
     metrics.dataCount = ndnStats_.dataPackets;
-    metrics.unsatisfiedInterests = ndnStats_.timeouts;
+    metrics.cacheHitRatio = (ndnStats_.interests > 0) 
+                           ? static_cast<double>(ndnStats_.cacheHits) / ndnStats_.interests : 0.0;
     
     return metrics;
 }
@@ -748,20 +747,16 @@ void NS3Adapter::sendMetricsToLeader() {
     
     NDNMetrics metrics = collectNDNMetrics();
     
-    // Create JSON message
     Json::Value json;
     json["type"] = "NDN_METRICS";
     json["timestamp"] = metrics.timestamp;
-    json["pit_size"] = static_cast<Json::UInt>(metrics.pitSize);
+    json["pit_size"] = metrics.pitSize;
+    json["cache_hits"] = metrics.cacheHits;
     json["avg_latency"] = metrics.avgLatency;
-    json["unsatisfied_interests"] = static_cast<Json::UInt>(metrics.unsatisfiedInterests);
-    json["interest_count"] = static_cast<Json::UInt64>(metrics.interestCount);
-    json["data_count"] = static_cast<Json::UInt64>(metrics.dataCount);
+    json["packet_loss"] = metrics.packetLoss;
+    json["interest_count"] = metrics.interestCount;
+    json["data_count"] = metrics.dataCount;
     json["cache_hit_ratio"] = metrics.cacheHitRatio;
-    json["fib_entries"] = static_cast<Json::UInt>(metrics.fibEntries);
-    json["emergency_messages"] = static_cast<Json::UInt>(metrics.emergencyMessages);
-    json["safety_messages"] = static_cast<Json::UInt>(metrics.safetyMessages);
-    json["network_utilization"] = metrics.networkUtilization;
     
     Json::StreamWriterBuilder builder;
     std::string message = Json::writeString(builder, json) + "\n";
