@@ -1,0 +1,3 @@
+package src;
+
+@license(LGPL);
