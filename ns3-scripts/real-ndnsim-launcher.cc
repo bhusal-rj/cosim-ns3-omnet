@@ -1,4 +1,3 @@
-// Create ns3-scripts/real-ndnsim-launcher.cc
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ndnSIM-module.h"
@@ -50,13 +49,12 @@ public:
         nodes_.Create(15); // 4 RSUs + 11 vehicles
         
         // Install NDN stack
-        ndn::StackHelper ndnHelper;
+        ns3::ndn::StackHelper ndnHelper;
         ndnHelper.InstallAll();
         
-        // Setup V2X applications
-        ndn::AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
+        ns3::ndn::AppHelper consumerHelper("ns3::ndn::ConsumerCbr");
         consumerHelper.SetPrefix("/kathmandu/intersection");
-        consumerHelper.SetAttribute("Frequency", StringValue("2"));
+        consumerHelper.SetAttribute("Frequency", ns3::StringValue("2"));
         
         // Install on vehicle nodes (manually add individual nodes)
         for (uint32_t i = 4; i < nodes_.GetN(); i++) {
@@ -64,7 +62,7 @@ public:
         }
         
         // Producer on RSU
-        ndn::AppHelper producerHelper("ns3::ndn::Producer");
+        ns3::ndn::AppHelper producerHelper("ns3::ndn::Producer");
         producerHelper.SetPrefix("/kathmandu/intersection");
         producerHelper.Install(nodes_.Get(0)); // Central RSU
         
@@ -154,6 +152,4 @@ int main(int argc, char* argv[]) {
         std::cout << "❌ Failed to connect to leader" << std::endl;
         return 1;
     }
-    
-    return 0;
 }

@@ -27,6 +27,8 @@ void Orchestrator::initialize() {
 void Orchestrator::handleMessage(cMessage *msg) {
     // We only expect our self-message.
     if (msg == socket_check_event) {
+        EV << "🔍 Checking for client data... client_connected=" << client_connected << ", client_socket=" << client_socket << endl;
+        
         // Only process data if a client has successfully connected
         if (client_connected) {
             handleClientData();
@@ -36,6 +38,8 @@ void Orchestrator::handleMessage(cMessage *msg) {
             if (simTime() > 5.0 && fmod(simTime().dbl(), 10.0) < 0.5) {
                  sendCommandToClient("TYPE:NFV_COMMAND|DATA:Migrate_VNF_to_Node_B\n");
             }
+        } else {
+            EV << "⏳ Client not yet connected, waiting..." << endl;
         }
         // Reschedule the check for the next interval
         scheduleAt(simTime() + 0.5, socket_check_event);
@@ -93,23 +97,46 @@ void Orchestrator::startTcpServer() {
 }
 
 void Orchestrator::handleClientData() {
-    char buffer[4096];
-    // Use MSG_DONTWAIT for a non-blocking receive call.
-    ssize_t bytes_received = ::recv(client_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
-
-    if (bytes_received > 0) {
-        // Message received successfully
-        buffer[bytes_received] = '\0'; // Null-terminate the string
-        EV << "📥 Received from ns-3: " << buffer;
-    } else if (bytes_received == 0) {
-        // Client disconnected gracefully
-        EV << "ℹ️ ns-3 client disconnected." << std::endl;
-        client_connected = false;
+    if (client_socket == -1) {
+        EV << "⚠️ client_socket is -1, returning" << endl;
+        return;
+    }
+    
+    char buffer[1024];
+    ssize_t bytesRead = recv(client_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
+    
+    // Add debugging for all recv() results
+    if (bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        
+        // Display that data has been received
+        EV << "📥 DATA RECEIVED from ns-3 client!" << endl;
+        EV << "📊 Data content: " << buffer << endl;
+        EV << "📏 Bytes received: " << bytesRead << endl;
+        
+        // Also print to console for immediate visibility
+        std::cout << "📥 DATA RECEIVED from ns-3 client!" << std::endl;
+        std::cout << "📊 Data: " << buffer << std::endl;
+        
+        // For now, just acknowledge the data (you can add processing logic later)
+        std::string response = "ACK: Data received\n";
+        ::send(client_socket, response.c_str(), response.length(), 0);
+        
+    } else if (bytesRead == 0) {
+        EV << "ℹ️ ns-3 client disconnected." << endl;
+        std::cout << "ℹ️ ns-3 client disconnected." << std::endl;
         close(client_socket);
         client_socket = -1;
+        client_connected = false;
     } else {
-        // No data waiting (EWOULDBLOCK) or an error occurred.
-        // This is normal for a non-blocking socket, so we don't log an error.
+        // bytesRead < 0 - check errno
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            EV << "❌ recv() error: " << strerror(errno) << endl;
+            std::cout << "❌ recv() error: " << strerror(errno) << std::endl;
+        } else {
+            // No data available right now (normal for non-blocking)
+            EV << "🔍 No data available (EAGAIN/EWOULDBLOCK)" << endl;
+        }
     }
 }
 
