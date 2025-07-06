@@ -5,14 +5,7 @@ echo "🚀 Launching V2X-NDN-NFV Co-simulation Platform"
 echo "Leader-Follower Architecture: OMNeT++ ↔ ndnSIM"
 
 # Find available port
-AVAILABLE_PORT=$(python3 -c "
-import socket
-s = socket.socket()
-s.bind(('', 0))
-port = s.getsockname()[1]
-s.close()
-print(port)
-")
+AVAILABLE_PORT=9999
 
 echo "📡 Using port: $AVAILABLE_PORT"
 
