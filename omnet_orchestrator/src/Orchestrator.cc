@@ -2,6 +2,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <cstring>
+#include <json/json.h> // Include JSON library header
 
 // Register the module with OMNeT++
 Define_Module(Orchestrator);
@@ -97,31 +98,50 @@ void Orchestrator::startTcpServer() {
 }
 
 void Orchestrator::handleClientData() {
-    if (client_socket == -1) {
-        EV << "⚠️ client_socket is -1, returning" << endl;
-        return;
-    }
-    
     char buffer[1024];
-    ssize_t bytesRead = recv(client_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
-    
-    // Add debugging for all recv() results
+    ssize_t bytesRead = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
     if (bytesRead > 0) {
         buffer[bytesRead] = '\0';
-        
-        // Display that data has been received
+        std::string msg(buffer);
+
+        // Print received data
         EV << "📥 DATA RECEIVED from ns-3 client!" << endl;
         EV << "📊 Data content: " << buffer << endl;
-        EV << "📏 Bytes received: " << bytesRead << endl;
-        
-        // Also print to console for immediate visibility
         std::cout << "📥 DATA RECEIVED from ns-3 client!" << std::endl;
         std::cout << "📊 Data: " << buffer << std::endl;
-        
-        // For now, just acknowledge the data (you can add processing logic later)
-        std::string response = "ACK: Data received\n";
-        ::send(client_socket, response.c_str(), response.length(), 0);
-        
+
+        // === ADD THIS BLOCK ===
+        Json::Value root;
+        Json::CharReaderBuilder reader;
+        std::string errs;
+        std::istringstream s(msg);
+        if (Json::parseFromStream(reader, s, &root, &errs)) {
+            if (root.isMember("request") && root["request"].asString() == "position" && root.isMember("node")) {
+                int nodeId = root["node"].asInt();
+                // Generate or look up new position for nodeId
+                double x = 100.0 + nodeId * 10; // Example logic
+                double y = 200.0 + nodeId * 5;
+                double z = 0.0;
+
+                Json::Value resp;
+                resp["node"] = nodeId;
+                resp["x"] = x;
+                resp["y"] = y;
+                resp["z"] = z;
+                Json::StreamWriterBuilder builder;
+                std::string response = Json::writeString(builder, resp) + "\n";
+                ::send(client_socket, response.c_str(), response.length(), 0);
+
+                EV << "📤 Sent position to ns-3: " << response << endl;
+                std::cout << "📤 Sent position to ns-3: " << response << std::endl;
+            }
+        }
+        // === END BLOCK ===
+
+        // Optionally, send ACK for other data
+        std::string ack = "ACK: Data received\n";
+        ::send(client_socket, ack.c_str(), ack.length(), 0);
+
     } else if (bytesRead == 0) {
         EV << "ℹ️ ns-3 client disconnected." << endl;
         std::cout << "ℹ️ ns-3 client disconnected." << std::endl;

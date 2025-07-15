@@ -22,7 +22,7 @@ INCLUDE_PATH =
 EXTRA_OBJS =
 
 # Additional libraries (-L, -l options)
-LIBS = -lpthread
+LIBS = -ljsoncpp -lpthread
 
 # Output directory
 PROJECT_OUTPUT_DIR = out
@@ -61,7 +61,7 @@ include $(CONFIGFILE)
 # Simulation kernel and user interface libraries
 OMNETPP_LIBS = $(OPPMAIN_LIB) $(USERIF_LIBS) $(KERNEL_LIBS) $(SYS_LIBS)
 
-COPTS = $(CFLAGS) $(IMPORT_DEFINES)  $(INCLUDE_PATH) -I$(OMNETPP_INCL_DIR)
+COPTS = $(CFLAGS) $(IMPORT_DEFINES)  $(INCLUDE_PATH) -I$(OMNETPP_INCL_DIR) -I/usr/include/jsoncpp
 MSGCOPTS = $(INCLUDE_PATH)
 SMCOPTS =
 
